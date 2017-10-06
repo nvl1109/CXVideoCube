@@ -39,6 +39,10 @@ extern "C"
 #include "Matrix4.h"
 #include "Exception.h"
 
+#ifdef __USING_X11__
+#include "X11Window.h"
+#endif
+
 #include <drm/drm_fourcc.h>
 
 
@@ -47,7 +51,7 @@ extern "C"
 
 
 // Codec parameter flags
-//    size_t is used to make it 
+//    size_t is used to make it
 //    64bit safe for use on Odroid C2
 const size_t EXTERNAL_PTS = 0x01;
 const size_t SYNC_OUTSIDE = 0x02;
@@ -61,32 +65,9 @@ const int BUFFER_SIZE = 1024 * 32;	// 4K video expected
 
 
 // EGL_EXT_image_dma_buf_import
-#define EGL_LINUX_DMA_BUF_EXT          0x3270
-
-#define EGL_LINUX_DRM_FOURCC_EXT        0x3271
-#define EGL_DMA_BUF_PLANE0_FD_EXT       0x3272
-#define EGL_DMA_BUF_PLANE0_OFFSET_EXT   0x3273
-#define EGL_DMA_BUF_PLANE0_PITCH_EXT    0x3274
-#define EGL_DMA_BUF_PLANE1_FD_EXT       0x3275
-#define EGL_DMA_BUF_PLANE1_OFFSET_EXT   0x3276
-#define EGL_DMA_BUF_PLANE1_PITCH_EXT    0x3277
-#define EGL_DMA_BUF_PLANE2_FD_EXT       0x3278
-#define EGL_DMA_BUF_PLANE2_OFFSET_EXT   0x3279
-#define EGL_DMA_BUF_PLANE2_PITCH_EXT    0x327A
-#define EGL_YUV_COLOR_SPACE_HINT_EXT    0x327B
-#define EGL_SAMPLE_RANGE_HINT_EXT       0x327C
-#define EGL_YUV_CHROMA_HORIZONTAL_SITING_HINT_EXT  0x327D
-#define EGL_YUV_CHROMA_VERTICAL_SITING_HINT_EXT    0x327E
-
-#define EGL_ITU_REC601_EXT   0x327F
-#define EGL_ITU_REC709_EXT   0x3280
-#define EGL_ITU_REC2020_EXT  0x3281
-
-#define EGL_YUV_FULL_RANGE_EXT    0x3282
-#define EGL_YUV_NARROW_RANGE_EXT  0x3283
-
-#define EGL_YUV_CHROMA_SITING_0_EXT    0x3284
-#define EGL_YUV_CHROMA_SITING_0_5_EXT  0x3285
+#ifndef EGL_EXT_image_dma_buf_import
+#error Please install latest mali driver at https://github.com/mdrjr/c2_mali
+#endif /* EGL_EXT_image_dma_buf_import */
 
 
 // OSD dma_buf experimental support
@@ -183,7 +164,7 @@ void _GL_CheckError(const char* file, int line)
 #define MIN_FRAME_QUEUE_SIZE  16
 #define MAX_WRITE_QUEUE_SIZE  1
 
-void* VideoDecoderThread(void* argument) 
+void* VideoDecoderThread(void* argument)
 {
 	// Initialize the codec
 	codec_para_t codecContext = { 0 };
@@ -218,9 +199,9 @@ void* VideoDecoderThread(void* argument)
 	codecContext.has_video = 1;
 	codecContext.noblock = 0;
 	codecContext.am_sysinfo.format = VIDEO_DEC_FORMAT_HEVC;
-	//codecContext.am_sysinfo.rate = (96000.0 / (24000.0 / 1001.0));	
+	//codecContext.am_sysinfo.rate = (96000.0 / (24000.0 / 1001.0));
 	codecContext.am_sysinfo.param = (void*)(SYNC_OUTSIDE);
-	
+
 #endif
 
 
@@ -269,7 +250,7 @@ void* VideoDecoderThread(void* argument)
 		{
 			api = codec_write(&codecContext, &buffer + offset, bytesRead - offset);
 			if (api == -EAGAIN)
-			{				
+			{
 				usleep(100);
 			}
 			else if (api == -1)
@@ -594,7 +575,7 @@ struct FrameBufferDmaInfo
 FrameBufferDmaInfo GetFrameBufferDmabufFd()
 {
 	FrameBufferDmaInfo info = { 0 };
-	
+
 	info.fd = open("/dev/fb0", O_RDWR);
 	printf("file handle: %x\n", info.fd);
 
@@ -619,7 +600,7 @@ FrameBufferDmaInfo GetFrameBufferDmabufFd()
 	ret = ioctl(info.fd, OSD_GET_DMA_BUF_FD, &result);
 	if (ret < 0)
 	{
-		printf("OSD_GET_DMA_BUF_FD failed. (%d)\n", ret);
+		printf("OSD_GET_DMA_BUF_FD failed. (%d): %s\n", ret, strerror(errno));
 		exit(1);
 	}
 	else
@@ -693,7 +674,7 @@ IonInfo OpenIonVideoCapture()
 	format.fmt.pix_mp.width = VIDEO_WIDTH;
 	format.fmt.pix_mp.height = VIDEO_HEIGHT;
 	format.fmt.pix_mp.pixelformat = VIDEO_FORMAT;
-	
+
 	int v4lcall = ioctl(info.IonVideoFD, VIDIOC_S_FMT, &format);
 	if (v4lcall < 0)
 	{
@@ -707,7 +688,7 @@ IonInfo OpenIonVideoCapture()
 	requestBuffers.count = BUFFER_COUNT;
 	requestBuffers.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 	requestBuffers.memory = V4L2_MEMORY_DMABUF;
-	
+
 	v4lcall = ioctl(info.IonVideoFD, VIDIOC_REQBUFS, &requestBuffers);
 	if (v4lcall < 0)
 	{
@@ -753,7 +734,7 @@ IonInfo OpenIonVideoCapture()
 		// Export the dma_buf
 		ion_fd_data fd_data = { 0 };
 		fd_data.handle = allocation_data.handle;
-		
+
 		ionCall = ioctl(info.IonFD, ION_IOC_SHARE, &fd_data);
 		if (ionCall < 0)
 		{
@@ -831,30 +812,32 @@ int main_ionvideo()
 
 	// Unblank display
 	init_display();
-	
+
 	// Ionvideo will not generate frames until connected
 	SetVfmState();
 
+#ifdef __USING_X11__
 	// Create EGL/GL rendering contexts
-	EGLDisplay display = Egl_Initialize();
+	X11Window window(3840, 2160, "C2 Video Cube");
+	EGLDisplay display = window.eglDisplay;
+#else
+    EGLDisplay display = Egl_Initialize();
+    EGLConfig config;
+    EGLSurface surface = Egl_CreateWindow(display, &config);
+    EGLContext context = Egl_CreateContext(display, surface, config);
+#endif
 
-	EGLConfig config;
-	EGLSurface surface = Egl_CreateWindow(display, &config);
-
-	EGLContext context = Egl_CreateContext(display, surface, config);
-
-
-	FrameBufferDmaInfo info = GetFrameBufferDmabufFd();	
+	FrameBufferDmaInfo info = GetFrameBufferDmabufFd();
 
 
 #if DIRECT_RENDERING
 	// fb0 direct rendering (render target)
 	EGLImageKHR frameBufferImage[MAX_SCREEN_BUFFERS] = { 0 };
-	
+
 	GLuint frameBufferTexture[MAX_SCREEN_BUFFERS] = { 0 };
 	glGenTextures(MAX_SCREEN_BUFFERS, frameBufferTexture);
 	GL_CheckError();
-	
+
 	for (int i = 0; i < MAX_SCREEN_BUFFERS; ++i)
 	{
 
@@ -868,7 +851,10 @@ int main_ionvideo()
 			EGL_NONE
 		};
 
+		printf("screen_buffer %d, width: %d, height: %d, fd: %d, offset: %d, pitch: %d\n", i, info.Width, info.Height, info.DmaBufferHandleFileDescriptor, info.LengthInBytes * i, info.Width * 4);
+
 		frameBufferImage[i] = eglCreateImageKHR(display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, 0, img_attrs);
+		// frameBufferImage[i] = eglCreateImageKHR(display, EGL_NO_CONTEXT, EGL_GL_TEXTURE_2D_KHR, 0, img_attrs);
 		Egl_CheckError();
 
 		printf("frameBufferImage = %p\n", frameBufferImage[i]);
@@ -1054,7 +1040,7 @@ int main_ionvideo()
 
 	glFrontFace(GL_CCW);
 	GL_CheckError();
-	
+
 	glViewport(0, 0, info.Width, info.Height);
 	GL_CheckError();
 
@@ -1111,7 +1097,7 @@ int main_ionvideo()
 				EGL_YUV_CHROMA_HORIZONTAL_SITING_HINT_EXT, EGL_YUV_CHROMA_SITING_0_5_EXT,
 				EGL_YUV_CHROMA_VERTICAL_SITING_HINT_EXT, EGL_YUV_CHROMA_SITING_0_5_EXT,
 				EGL_NONE
-			}; 
+			};
 
 			eglImage[i] = eglCreateImageKHR(display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, 0, img_attrs);
 			Egl_CheckError();
@@ -1140,17 +1126,17 @@ int main_ionvideo()
 		GL_CheckError();
 	}
 #endif
-	
+
 	// vfm_grabber support
 	int vfmFD = OpenVfmGrabber();
 
 
 	const int MAX_VFM_BUFFERS = 16;
-	
+
 	GLuint texture[MAX_VFM_BUFFERS] = { 0 };
 	glGenTextures(MAX_VFM_BUFFERS, texture);
 	GL_CheckError();
-	
+
 	std::queue<GLuint> textures;
 	for (int i = 0; i < MAX_VFM_BUFFERS; ++i)
 	{
@@ -1179,7 +1165,7 @@ int main_ionvideo()
 	ResetTime();
 
 	int currentBuffer = 0;
-	
+
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	GL_CheckError();
 
@@ -1209,8 +1195,8 @@ int main_ionvideo()
 		//	printf("currentBuffer error.");
 		//	exit(1);
 		//	break;
-		//} 
-		
+		//}
+
 		//float red = (rand() % 256) / 255.0f;
 		//float green = (rand() % 256) / 255.0f;
 		//float blue = (rand() % 256) / 255.0f;
@@ -1313,7 +1299,7 @@ int main_ionvideo()
 
 		//glClear(GL_COLOR_BUFFER_BIT);	//| GL_DEPTH_BUFFER_BIT
 		//GL_CheckError();
-		
+
 
 		// Quad
 		{
@@ -1347,7 +1333,7 @@ int main_ionvideo()
 #if 1
 			glUniform1i(diffuseMap, buffer.index);
 			GL_CheckError();
-#else		
+#else
 			glActiveTexture(GL_TEXTURE0);
 			GL_CheckError();
 
@@ -1396,13 +1382,18 @@ int main_ionvideo()
 		glDiscardFramebufferEXT(GL_FRAMEBUFFER, 2, attachments);
 		GL_CheckError();
 #else
+
+#ifdef __USING_X11__
+		window.SwapBuffers();
+#else
 		eglSwapBuffers(display, surface);
+#endif
 #endif
 
 #ifdef IONVIDEO
 		// Return the buffer to V4L
 		// Important: Ensure the GPU is done with the buffer before returning it.
-		//			  This can be done with glFinish(); or eglSwapBuffers	
+		//			  This can be done with glFinish(); or eglSwapBuffers
 		v4lCall = ioctl(ionInfo.IonVideoFD, VIDIOC_QBUF, &buffer);
 		if (v4lCall < 0)
 		{

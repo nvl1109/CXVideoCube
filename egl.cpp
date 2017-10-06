@@ -1,12 +1,16 @@
 #include "egl.h"
+#include "Exception.h"
 
+#include <iostream>
 #include <fcntl.h>
 #include <linux/fb.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
+#include <EGL/fbdev_window.h>
 
 
 fbdev_window window;
+Window x11win = 0;
 
 void _Egl_CheckError(const char* file, int line)
 {
@@ -16,6 +20,29 @@ void _Egl_CheckError(const char* file, int line)
 		printf("eglGetError(): %i (0x%.4x) - Failed at %s:%i\n", (int)error, (int)error, file, line);
 		exit(1);
 	}
+}
+
+EGLDisplay Egl_Initialize(EGLDisplay eglDisplay)
+{
+
+	// Initialize EGL
+	EGLint major;
+	EGLint minor;
+	EGLBoolean success = eglInitialize(eglDisplay, &major, &minor);
+	if (success != EGL_TRUE)
+	{
+		Egl_CheckError();
+	}
+
+	printf("EGL: major=%d, minor=%d\n", major, minor);
+	printf("EGL: Vendor=%s\n", eglQueryString(eglDisplay, EGL_VENDOR));
+	printf("EGL: Version=%s\n", eglQueryString(eglDisplay, EGL_VERSION));
+	printf("EGL: ClientAPIs=%s\n", eglQueryString(eglDisplay, EGL_CLIENT_APIS));
+	printf("EGL: Extensions=%s\n", eglQueryString(eglDisplay, EGL_EXTENSIONS));
+	printf("EGL: ClientExtensions=%s\n", eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS));
+	printf("\n");
+
+	return eglDisplay;
 }
 
 EGLDisplay Egl_Initialize()
@@ -50,6 +77,128 @@ EGLDisplay Egl_Initialize()
 	return display;
 }
 
+EGLConfig Egl_PickConfig(EGLDisplay eglDisplay)
+{
+    if (eglDisplay == NULL)
+        throw Exception("eglDisplay is null.");
+
+
+    EGLint configAttribs[] =
+    {
+        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+        EGL_RED_SIZE,        8,
+        EGL_GREEN_SIZE,      8,
+        EGL_BLUE_SIZE,       8,
+        EGL_ALPHA_SIZE,      8,
+        EGL_DEPTH_SIZE,      24,
+        EGL_STENCIL_SIZE,    0,
+        EGL_SURFACE_TYPE,    EGL_WINDOW_BIT,
+        EGL_NONE
+    };
+
+
+    // Determine config selection count
+    EGLint configCount;
+    eglChooseConfig(eglDisplay,
+                    configAttribs,
+                    NULL,
+                    0,
+                    &configCount);
+    Egl_CheckError();
+
+    if (configCount < 1)
+        throw Exception("No matching configs.");
+
+
+    // Get the total configs
+    EGLConfig configs[configCount];
+    eglChooseConfig(eglDisplay,
+                    configAttribs,
+                    configs,
+                    configCount,
+                    &configCount);
+    Egl_CheckError();
+
+
+    // Find a matching config
+    EGLConfig config = NULL;
+    bool isFound = false;
+
+    for (int i = 0; i < configCount; ++i)
+    {
+        config = configs[i];
+
+        // Test color format
+        EGLint colorSize;
+
+        eglGetConfigAttrib(eglDisplay, config, EGL_RED_SIZE, &colorSize);
+        std::cout << "red colorSize: " << colorSize << "\n";
+        if (colorSize != 8)
+        {
+            continue;
+        }
+        eglGetConfigAttrib(eglDisplay, config, EGL_GREEN_SIZE, &colorSize);
+        std::cout << "green colorSize: " << colorSize << "\n";
+        if (colorSize != 8)
+        {
+            continue;
+        }
+
+        eglGetConfigAttrib(eglDisplay, config, EGL_BLUE_SIZE, &colorSize);
+        std::cout << "blue colorSize: " << colorSize << "\n";
+        if (colorSize != 8)
+        {
+            continue;
+        }
+
+        eglGetConfigAttrib(eglDisplay, config, EGL_ALPHA_SIZE, &colorSize);
+        std::cout << "alpha colorSize: " << colorSize << "\n";
+        if (colorSize != 8)
+        {
+            continue;
+        }
+
+
+        // Test depth
+        EGLint configDepthSize;
+        eglGetConfigAttrib(eglDisplay, config, EGL_DEPTH_SIZE, &configDepthSize);
+        std::cout << "depth size: " << configDepthSize << "\n";
+        if (configDepthSize != 24)
+        {
+            continue;
+        }
+
+
+        // Test stencil
+        EGLint configStencilSize;
+        eglGetConfigAttrib(eglDisplay, config, EGL_STENCIL_SIZE, &configStencilSize);
+        std::cout << "stencil size: " << configStencilSize << "\n";
+        if (configStencilSize != 0)
+        {
+            // continue;
+        }
+
+        // Test samples
+        EGLint sampleSize;
+        eglGetConfigAttrib(eglDisplay, config, EGL_SAMPLES, &sampleSize);
+        std::cout << "sample size: " << sampleSize << "\n";
+        if (sampleSize > 1)
+        {
+            continue;
+        }
+
+        // A match was found
+        isFound = true;
+        break;
+    }
+
+
+    // if no matching config was found, throw
+    if (!isFound)
+        throw Exception("No matching EGLConfig found.");
+
+    return config;
+}
 
 EGLSurface Egl_CreateWindow(EGLDisplay display, EGLConfig* outConfig)
 {

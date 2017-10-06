@@ -8,5 +8,7 @@
 
 void _Egl_CheckError(const char* file, int line);
 EGLDisplay Egl_Initialize();
+EGLDisplay Egl_Initialize(EGLDisplay eglDisplay);
 EGLSurface Egl_CreateWindow(EGLDisplay display, EGLConfig* outConfig);
 EGLContext Egl_CreateContext(EGLDisplay display, EGLSurface surface, EGLConfig config);
+EGLConfig Egl_PickConfig(EGLDisplay eglDisplay);
